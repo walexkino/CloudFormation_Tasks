@@ -1,0 +1,32 @@
+Parameters:
+
+    EnvironmentName:
+        Description: This template is to IAC VPC and some of its components 
+        Type: String
+ 
+    VpcCIDR: 
+        Description: Please enter the IP range (CIDR notation)
+        Type: String
+        Default: 10.0.0.0/16
+
+Resources:
+   myVPC:
+     Type: AWS::EC2::VPC
+     Properties:
+       CidrBlock: !Ref VpcCIDR
+       EnableDnsSupport: true
+       Tags:
+         - Key: name
+           Value: !Ref EnvironmentName
+    
+    InternetGateCruise:
+      Type: AWS::EC2::InternetGateway
+      Properties:
+        Tags:
+          - Key: keyname
+            Value: !Ref EnvironmentName
+    AttachmentGatewayCruise:
+      Type: AWS::EC2::VPCGatewayAttachment
+      Properties:
+        VpcId: vpc-id
+        InternetGatewayId: !Ref igwName
