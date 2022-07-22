@@ -1,0 +1,135 @@
+#Challenge 2 >> for Cloud_formation
+#
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Creates the required network infrastructure for Public and Private routing with Internet access
+
+#defining the parameter that takes in values that was declared in the parameter json file
+Parameters:
+  EnvironmentName:
+    Description: Here is a network infrastructure for public and private routing with internet access
+    Type: String
+  VPCCIDR:
+    Type: String
+  PrivSubnetCIDR:
+    Type: String
+  PubSubnetCIDR:
+    Type: String
+
+#Now lets define the resources
+Resources:
+
+#The VPC 
+  MyMainVPC:
+    Type: AWS::EC2::VPC
+    Properties: 
+      CidrBlock: !Ref VPCCIDR
+      Tags: 
+        - Key: Name
+          Value: "Main VPC"
+
+          #Internet Gateway
+  InternetGW:
+    Type: AWS::EC2::InternetGateway
+
+    #Attaching the internet gateway to the VPC
+  AttachInternetGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref MyMainVPC
+      InternetGatewayId: !Ref InternetGW
+
+      #public subnet 1
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties: 
+      # Availability zone at your discretion or
+      # as a parameter
+      AvailabilityZone: 'us-east-1a'
+      CidrBlock: !Ref PubSubnetCIDR
+      MapPublicIpOnLaunch: true
+      Tags: 
+        - Key: Name
+          Value: "Public Subnet AZ1"
+      VpcId: !Ref MyMainVPC
+
+      #Private subnet 1
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties: 
+      AvailabilityZone: 'us-east-1b'
+      CidrBlock: !Ref PrivSubnetCIDR
+      MapPublicIpOnLaunch: false
+      Tags: 
+        - Key: Name
+          Value: "Private Subnet AZ1"
+      VpcId: !Ref MyMainVPC
+
+      #Nat Gateway
+  NAT:
+    Type: AWS::EC2::NatGateway
+    Properties:
+        AllocationId:
+          Fn::GetAtt:
+          - EIP
+          - AllocationId
+        SubnetId: !Ref PublicSubnet1
+        Tags:
+        - Key: Name
+          Value: "NAT to be used by servers in the private subnet"
+
+          #Elastic Ip for a static IP for the NAT Gateway
+  EIP:
+    Type: AWS::EC2::EIP
+    Properties:
+        Tags:
+        - Key: Name
+          Value: "Elastic IP for our NAT Gateway"
+
+          #Private Routing Table
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties: 
+      Tags: 
+        - Key: Name
+          Value: "Private Route Table"
+      VpcId: !Ref MyMainVPC
+
+      #Public Routing Table
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties: 
+      Tags: 
+        - Key: Name
+          Value: "Public Route Table"
+      VpcId: !Ref MyMainVPC
+
+      #Associating the public routing Table with the public subnet
+  AssociatePUBRT:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: 
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet1
+
+      #Associating the Private routing Table with the Private subnet
+  AssociatePRIVRT:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: 
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnet1
+
+      #Public internet routing 
+  PublicInternetRoute:
+    Type: AWS::EC2::Route
+    Properties:
+       RouteTableId: !Ref PublicRouteTable
+       DestinationCidrBlock: 0.0.0.0/0
+       GatewayId: !Ref InternetGW
+
+       #Private internet outbound routing
+  PrivateInternetOutboundRoute:
+    Type: AWS::EC2::Route
+    Properties:
+       RouteTableId: !Ref PrivateRouteTable
+       DestinationCidrBlock: 0.0.0.0/0
+       NatGatewayId: !Ref NAT
