@@ -1,9 +1,159 @@
 Description: >
     Walexkino udacity cruise lecture
 
+#parameters
 Parameters:
 
     EnvironmentName:
         Description: An environment name that will be prefixed to resource names
         Type: String
+
+
+
+        #defining resources 
 Resources:
+
+  #Specifying security group for the loadbalancer
+  LBSecGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow http to our load balancer
+      VpcId:
+        Fn::ImportValue:
+          !Sub "${EnvironmentName}-VPCID"
+          #Ingress-inbound
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 0.0.0.0/0
+        #egress outbound
+      SecurityGroupEgress:
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 0.0.0.0/0
+        #Allowing the Load balancer to reach out to port other than port 80 (http) so we should add another rule of 8080 custom tcp port
+      - IpProtocol: tcp
+        FromPort: 8080
+        ToPort: 8080
+        CidrIp: 0.0.0.0/0
+
+  #specifying security group for your webserver
+  WebServerSecGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow http to our hosts and SSH (port 22) from local only
+      VpcId:
+        Fn::ImportValue:
+          !Sub "${EnvironmentName}-VPCID"
+          #Ingress NSG rules means traffic from outside trying to hit your resources, normally this port is always closed by default
+          #to prevent outside world from hitting your app in the VPC space.
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 8080 #this is the porta range from port 8080 to  8080
+        ToPort: 8080  
+        CidrIp: 0.0.0.0/0 #allowing whatever IP's in the internet space gain that access on that port 
+        #SPECIFYING another NSG rule below, remeber like we do in Azure that we use to specify lots of NSG rules ports so it can be reached
+        #that's the same case in AWS, is'nt that interesting. It gonna be fun learning this shii
+      - IpProtocol: tcp
+        FromPort: 22
+        ToPort: 22
+        CidrIp: 0.0.0.0/0
+
+        #now specifying the Egress -outbound rules >> these rule means that allowing or denying traffic orginating from your resource
+        #or server in this case 
+        #for example if you want your server to connect to the internet to download patches or updates, you want it to connect to the 
+        #internet unrestricted
+      SecurityGroupEgress:
+      - IpProtocol: tcp
+        FromPort: 0 #port range from port 0 to port 65535
+        ToPort: 65535
+        CidrIp: 0.0.0.0/0
+
+       #creating a web app launch file for auto-scaling  
+  WebAppLaunchConfig:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          sudo apt-get update -y
+          sudo apt-get install apache2 -y
+          sudo systemctl start apache2.service  
+          cd /var/www/html
+          echo "Udacity Demo Web Server Up and Running!" > index.html #this command indicates the index.html file is created and then the string is parsed into the index.html file
+
+          #note the above code for the when yu already loaded your files inside the ubuntu machine it cd into the file path and echoes the 
+          #index.html page
+
+      # ToDo: AMI ID of Ubuntu Linux machine. Too get one, try creating a VM from the web console. 
+      ImageId: ami-052efd3df9dad4825
+
+      # ToDo: Change the key-pair name, as applicable to you. 
+      KeyName: walexkino-papy-server
+
+      SecurityGroups:
+      - Ref: WebServerSecGroup #reference to security group 
+      InstanceType: t3.medium #specification for the machine - like ASP
+      BlockDeviceMappings:
+      - DeviceName: "/dev/sdk"
+        Ebs:
+          VolumeSize: '10' #10gb machine
+  WebAppGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      VPCZoneIdentifier:
+      - Fn::ImportValue: 
+          !Sub "${EnvironmentName}-PRIV-NETS"
+      LaunchConfigurationName:
+        Ref: WebAppLaunchConfig
+      MinSize: '3'
+      MaxSize: '5'
+      TargetGroupARNs:
+      - Ref: WebAppTargetGroup
+  WebAppLB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Subnets:
+      - Fn::ImportValue: !Sub "${EnvironmentName}-PUB1-SN"
+      - Fn::ImportValue: !Sub "${EnvironmentName}-PUB2-SN"
+      SecurityGroups:
+      - Ref: LBSecGroup
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+      - Type: forward
+        TargetGroupArn:
+          Ref: WebAppTargetGroup
+      LoadBalancerArn:
+        Ref: WebAppLB
+      Port: '80'
+      Protocol: HTTP
+  ALBListenerRule:
+      Type: AWS::ElasticLoadBalancingV2::ListenerRule
+      Properties:
+        Actions:
+        - Type: forward
+          TargetGroupArn: !Ref 'WebAppTargetGroup'
+        Conditions:
+        - Field: path-pattern
+          Values: [/] #target group of server
+        ListenerArn: !Ref 'Listener'
+        Priority: 1
+
+  WebAppTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 8
+      HealthyThresholdCount: 2
+      Port: 8080
+      Protocol: HTTP
+      UnhealthyThresholdCount: 5
+      VpcId:  #VPC id as to where the resource is to be created
+        Fn::ImportValue:
+          Fn::Sub: "${EnvironmentName}-VPCID"
